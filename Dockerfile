@@ -1,7 +1,7 @@
 # Set up a docker image for fetalReconstruction
 # https://github.com/bkainz/fetalReconstruction
 #
-# Jeff Stout BCH 20190625
+# Jeff Stout BCH 20190731
 #
 # Build with
 #
@@ -84,6 +84,7 @@ RUN mkdir /usr/src/fetalReconstruction/source/build \
 RUN cd /usr/src/fetalReconstruction/source/build \
     # && cmake -DCUDA_SDK_ROOT_DIR:PATH=/usr/local/cuda-9.1/samples -DCUDA_NVCC_FLAGS=-gencode=arch=compute_30,code=sm_35 .. \
     && cmake -DCUDA_SDK_ROOT_DIR:PATH=/usr/local/cuda-9.1/samples .. \
+    # && cmake -DCUDA_SDK_ROOT_DIR:PATH=/usr/local/cuda-9.1/samples -DCUDA_CUDA_LIBRARY:PATH=/usr/lib/x86_64-linux-gnu/libcuda.so .. \
     && make \
     && cp /usr/src/fetalReconstruction/source/bin/PVRreconstructionGPU /usr/bin \
     && cp /usr/src/fetalReconstruction/source/bin/SVRreconstructionGPU /usr/bin
