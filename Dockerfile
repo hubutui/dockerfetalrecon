@@ -13,9 +13,9 @@
 #
 # To run an interactive shell inside this container, do:
 #
-#   docker run -it fetalrecon /bin/bash 
+#   docker run --gpus all -it fetalrecon /bin/bash 
 #
-#   docker run -it --mount type=bind,source=/home/jeff/data/,target=/data fetalrecon
+#   docker run --gpus all -it --mount type=bind,source=/home/jeff/data/,target=/data fetalrecon
 #
 # To pass an env var HOST_IP to container, do:
 #
@@ -45,92 +45,74 @@ RUN         apt-get update \
                     gcc \
                     libtbb-dev \
                     libgsl-dev \
-                    cmake-curses-gui
+                    cmake-curses-gui \
+                    libpng-dev
 
 # add cuda samples to the image
-ADD ./samples.tar.gz /usr/local/cuda-9.1
+# ADD ./samples.tar.gz /usr/local/cuda-9.1
 
-# These samples are extracted from the downloadable installation for CUDA-9.1
-# https://developer.nvidia.com/compute/cuda/9.1/Prod/cluster_management/cuda_cluster_pkgs_9.1.85_ubuntu1604
-# under cuda_cluster_pkgs_ubuntu1604/cuda-cluster-devel-9-1_9.1.85-1_amd64.deb/data.tar.xz/samples
-# This could be made better, by dl and extract in the docker file.
-RUN make -C /usr/local/cuda-9.1/samples
+RUN wget https://developer.nvidia.com/compute/cuda/9.1/Prod/cluster_management/cuda_cluster_pkgs_9.1.85_ubuntu1604 -P /usr/src/ \
+    && tar -zxvf /usr/src/cuda_cluster_pkgs_9.1.85_ubuntu1604 cuda_cluster_pkgs_ubuntu1604/cuda-cluster-devel-9-1_9.1.85-1_amd64.deb \
+    && ar x ./cuda_cluster_pkgs_ubuntu1604/cuda-cluster-devel-9-1_9.1.85-1_amd64.deb data.tar.xz \
+    && tar -xJvf data.tar.xz ./usr/local/cuda-9.1/samples \
+    && make -C /usr/local/cuda-9.1/samples \
+    && rm -r cuda_cluster_pkgs_ubuntu1604 && rm data.tar.xz && rm /usr/src/cuda_cluster_pkgs_9.1.85_ubuntu1604
 
 # this is the relevant fetalReconstruction
 # COPY ./fetalReconstruction /usr/src/fetalReconstruction/
 RUN git clone https://github.com/bkainz/fetalReconstruction.git /usr/src/fetalReconstruction/
 
 # add boost and install additional libraries
-# ADD ./boost_1_58_0.tar.bz2 /usr/src/boost/
 RUN wget https://sourceforge.net/projects/boost/files/boost/1.58.0/boost_1_58_0.tar.bz2 -P /usr/src/ \
-    && cd /usr/src/ && tar -xf boost_1_58_0.tar.bz2
-
-RUN cd /usr/src/boost_1_58_0 \
-    && ./bootstrap.sh --with-libraries=program_options,filesystem,system,thread \
+    && cd /usr/src/ && tar -xf boost_1_58_0.tar.bz2 \
+    && cd /usr/src/boost_1_58_0 \
+    && ./bootstrap.sh --with-libraries=program_options,filesystem,system,thread,atomic,chrono,date_time \
     && ./b2 install
-
-# ADD ./tbb2019_20190605oss_lin.tgz /usr/src/tbb/
-# no longer needed with the pacakge added above 
 
 # build ZLIB
 RUN cd /usr/src/fetalReconstruction/source/IRTKSimple2/nifti/zlib \
     && ./configure && make install
 
-RUN         apt-get update \
-                && apt-get install -y --no-install-recommends \
-			libpng-dev
-
 # set up and build the fetalRecon software 
 RUN mkdir /usr/src/fetalReconstruction/source/build \
         && mkdir /data \
-	&& cd /usr/src/fetalReconstruction/source/build \
-	&& cmake .. \
-	&& cmake -D CUDA_SDK_ROOT_DIR:PATH=/usr/local/cuda-9.1/samples .. \
-	&& make \
+    && cd /usr/src/fetalReconstruction/source/build 
+
+# RUN mkdir /usr/src/fetalReconstruction/source/IRTKSimple2/build \
+#     && cd /usr/src/fetalReconstruction/source/IRTKSimple2/build && cmake .. && make 
+
+RUN cd /usr/src/fetalReconstruction/source/build \
+    # && cmake -DCUDA_SDK_ROOT_DIR:PATH=/usr/local/cuda-9.1/samples -DCUDA_NVCC_FLAGS=-gencode=arch=compute_30,code=sm_35 .. \
+    && cmake -DCUDA_SDK_ROOT_DIR:PATH=/usr/local/cuda-9.1/samples .. \
+    && make \
     && cp /usr/src/fetalReconstruction/source/bin/PVRreconstructionGPU /usr/bin \
     && cp /usr/src/fetalReconstruction/source/bin/SVRreconstructionGPU /usr/bin
 
 #############################################################################
+#  http://arnon.dk/matching-sm-architectures-arch-and-gencode-for-various-nvidia-cards/
+#  https://docs.nvidia.com/cuda/cuda-compiler-driver-nvcc/index.html#gpu-compilation
+#  "In fact, --gpu-architecture=arch --gpu-code=code,... is equivalent to --generate-code=arch=arch,code=code,.... "
+#  -gencode=arch=compute_70,code=sm_70
+#  -gencode=arch=compute_30,code=sm_30 (this was native for the fetal recon intially, I think)
 
-# some example code: 
+# did not make the samples
+# cmake \
+# -D Boost_DIR:PATH=/usr/src/boost_1_58_0 \
+# -D CUDA_SDK_ROOT_DIR:PATH=/usr/local/cuda-9.1/samples \
+# -D CUDA_nppi_LIBRARY:PATH=/lib/libnppc.so.9.1 \
+# -D Boost_ATOMIC_LIBRARY_DEBUG:PATH=/usr/local/lib/libboost_atomic.so \
+# -D Boost_ATOMIC_LIBRARY_RELEASE:PATH=/usr/local/lib/libboost_atomic.so \
+# -D Boost_CHRONO_LIBRARY_DEBUG:PATH=/usr/local/lib/libboost_chrono.so \
+# -D Boost_CHRONO_LIBRARY_RELEASE:PATH=/usr/local/lib/libboost_chrono.so \
+# -D Boost_DATE_TIME_LIBRARY_DEBUG:PATH=/usr/local/lib/libboost_date_time.so \
+# -D Boost_DATE_TIME_LIBRARY_RELEASE:PATH=/usr/local/lib/libboost_date_time.so \
+# ..
 
-# RUN mkdir -p /usr/src/boost \
-#     && curl -SL http://example.com/big.tar.xz \
-#     | tar -xJC /usr/src/things \
-#     && make -C /usr/src/things all
 
+# ?? memorycheck_command
+# ?? still struggling with boost root 
+# Need to run cmake multiple times?
 
-
-# # Example Dockerfile from Hsaio
-
-# FROM python:3.7-alpine3.9
-
-# # https://stackoverflow.com/questions/55808233/alpine-docker-image-from-python3-x-alpine3-x-uses-different-package-version-for
-
-# RUN echo "http://dl-cdn.alpinelinux.org/alpine/edge/main" >> /etc/apk/repositories && apk update
-
-# RUN apk del .python-rundeps
-
-# RUN apk add git gcc linux-headers musl-dev libffi-dev openssl-dev python3-dev
-
-# COPY . /nirscloud_auth
-# WORKDIR /nirscloud_auth
-
-# RUN mkdir /etc/nirscloud_auth
-# COPY production.ini.template /etc/nirscloud_auth/production.ini
-
-# RUN python --version
-# RUN pip3 install -r requirements.txt
-# RUN python3 setup.py develop
-
-# ENTRYPOINT ["python", "-m", "nirscloud_auth.main", "-i", "/etc/nirscloud_auth/production.ini", "-p", "3456"]
-
-# perhaps could set it up like the mirtk docker image:
-
-# # Make "mirtk" the default executable for application containers
-# ENTRYPOINT ["python", "/usr/local/bin/mirtk"]
-# CMD ["help"]
-
-# # Assume user data volume to be mounted at /data
-# #   docker run --volume=/path/to/data:/data
-# WORKDIR /data
+# useful test
+# cd /usr/src/fetalReconstruction/data
+# PVRreconstructionGPU -o 3TReconstruction.nii.gz -i 14_3T_nody_001.nii.gz 10_3T_nody_001.nii.gz 21_3T_nody_001.nii.gz 23_3T_nody_001.nii.gz -m mask_10_3T_brain_smooth.nii.gz --resolution 1.0
