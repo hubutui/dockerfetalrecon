@@ -19,6 +19,8 @@
 #
 #   docker run --gpus all -it --mount type=bind,source=/neuro/users/jeff.stout/docker/data,target=/data fetalrecon
 #
+#   docker run --gpus '"device=1"' -it --mount type=bind,source=/neuro/users/jeff.stout/docker/data,target=/data fetalrecon
+# 
 # To pass an env var HOST_IP to container, do:
 #
 #   docker run -ti -e HOST_IP=$(ip route | grep -v docker | awk '{if(NF==11) print $9}') --entrypoint /bin/bash local/chris_dev_backend
@@ -73,16 +75,16 @@ RUN wget https://developer.nvidia.com/compute/cuda/9.1/Prod/cluster_management/c
     && make -C /usr/local/cuda-9.1/samples \
     && rm -r cuda_cluster_pkgs_ubuntu1604 && rm data.tar.xz && rm /usr/src/cuda_cluster_pkgs_9.1.85_ubuntu1604
 
-# this is the relevant fetalReconstruction
-# COPY ./fetalReconstruction /usr/src/fetalReconstruction/
-RUN git clone https://github.com/bkainz/fetalReconstruction.git /usr/src/fetalReconstruction/
-
 # add boost and install additional libraries
 RUN wget https://sourceforge.net/projects/boost/files/boost/1.58.0/boost_1_58_0.tar.bz2 -P /usr/src/ \
     && cd /usr/src/ && tar -xf boost_1_58_0.tar.bz2 \
     && cd /usr/src/boost_1_58_0 \
     && ./bootstrap.sh --with-libraries=program_options,filesystem,system,thread,atomic,chrono,date_time \
     && ./b2 install
+
+# this is the relevant fetalReconstruction use the copy when you need to modify the code
+COPY ./fetalReconstruction /usr/src/fetalReconstruction/
+# RUN git clone https://github.com/bkainz/fetalReconstruction.git /usr/src/fetalReconstruction/
 
 # build ZLIB
 RUN cd /usr/src/fetalReconstruction/source/IRTKSimple2/nifti/zlib \
@@ -93,8 +95,17 @@ RUN mkdir /usr/src/fetalReconstruction/source/build \
         && mkdir /data \
     && cd /usr/src/fetalReconstruction/source/build 
 
+# update cmake to the latest version so that it plays nice with CUDA 9.0
+RUN apt-get update \
+                && apt-get install -y --no-install-recommends \
+                    apt-transport-https ca-certificates gnupg software-properties-common wget \
+    && wget -O - https://apt.kitware.com/keys/kitware-archive-latest.asc 2>/dev/null | apt-key add - \
+    && apt-add-repository 'deb https://apt.kitware.com/ubuntu/ xenial main' \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends cmake
+
 RUN cd /usr/src/fetalReconstruction/source/build \
-    && cmake -DCUDA_SDK_ROOT_DIR:PATH=/usr/local/cuda-9.1/samples -DCUDA_NVCC_FLAGS=-gencode=arch=compute_30,code=sm_35 .. \
+    && cmake -DCUDA_SDK_ROOT_DIR:PATH=/usr/local/cuda-9.1/samples -DCUDA_NVCC_FLAGS=-gencode=arch=compute_70,code=sm_70 .. \
     # && cmake -DCUDA_SDK_ROOT_DIR:PATH=/usr/local/cuda-9.1/samples .. \
     # && cmake -DCUDA_SDK_ROOT_DIR:PATH=/usr/local/cuda-9.1/samples -DCUDA_CUDA_LIBRARY:PATH=/usr/lib/x86_64-linux-gnu/libcuda.so .. \
     && make ; exit 0
@@ -116,5 +127,7 @@ RUN cd /usr/src/fetalReconstruction/source/build \
 # cd /usr/src/fetalReconstruction/data
 # PVRreconstructionGPU -o 3TReconstruction.nii.gz -i 14_3T_nody_001.nii.gz 10_3T_nody_001.nii.gz 21_3T_nody_001.nii.gz 23_3T_nody_001.nii.gz -m mask_10_3T_brain_smooth.nii.gz --resolution 1.0
 # current error:
-# CUDA error at /usr/src/fetalReconstruction/source/reconstructionGPU2/include/reconVolume.cuh:51 code=2(cudaErrorMemoryAllocation) "cudaMalloc((void **)&m_d_data, m_size.x * m_size.y * m_size.z * sizeof(T))" 
-# so the GPU actually has no memory left due to python processes...
+# CUDA Error in patchBasedPSFReconstructionKernel(), line 132: too many resources requested for launch
+# NOTE: all the other various memory errors were fixed by making certain there was sufficient memory open to run the code
+# all the compile errors (some very werid) were fixed by updating cmake
+
