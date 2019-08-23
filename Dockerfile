@@ -1,7 +1,7 @@
 # Set up a docker image for fetalReconstruction
 # https://github.com/bkainz/fetalReconstruction
 #
-# Jeff Stout BCH 20190731
+# Jeff Stout BCH 201900823
 #
 # Build with
 #
@@ -9,7 +9,7 @@
 #
 # In the case of a proxy (located at 192.168.13.14:3128), do:
 #
-#    docker build --build-arg http_proxy=http://10.41.13.4:3128 --build-arg https_proxy=https://10.41.13.6:3128 -t fetalrecon .
+#    docker build --build-arg http_proxy=http://10.41.13.4:3128 --build-arg https_proxy=https://10.41.13.6:3128 -t fetalrecon:6.5 .
 #
 # --no-cache will force a clean build
 # 
@@ -17,9 +17,9 @@
 #
 #   docker run --gpus all -it fetalrecon /bin/bash 
 #
-#   docker run --gpus all -it --mount type=bind,source=/neuro/users/jeff.stout/docker/data,target=/data fetalrecon
+#   docker run --gpus all -it --mount type=bind,source=/neuro/users/jeff.stout/docker/data,target=/data fetalrecon:6.5
 #
-#   docker run --gpus '"device=1"' -it --mount type=bind,source=/neuro/users/jeff.stout/docker/data,target=/data fetalrecon
+#   docker run --gpus '"device=1"' -it --mount type=bind,source=/neuro/users/jeff.stout/docker/data,target=/data fetalrecon:6.5
 # 
 # To pass an env var HOST_IP to container, do:
 #
@@ -39,13 +39,8 @@
 #     "default-runtime": "nvidia"
 # }
 
-FROM nvidia/cuda:9.1-devel-ubuntu16.04
+FROM nvidia/cuda:6.5-devel
 # https://hub.docker.com/r/nvidia/cuda
-
-# using build command noted above is better pratice
-# ENV http_proxy http://10.41.13.4:3128
-
-# ENV https_proxy https://10.41.13.6:3128
 
 # update and install dependencies
 RUN         apt-get update \
@@ -61,19 +56,19 @@ RUN         apt-get update \
                     cmake \
                     gcc \
                     libtbb-dev \
-                    libgsl-dev \
+                    # libgsl-dev \
                     cmake-curses-gui \
                     libpng-dev
 
 # add cuda samples to the image
-# ADD ./samples.tar.gz /usr/local/cuda-9.1
+# COPY ./cuda-samples-linux-6.5.14-18745345.run /usr/cudasamples/
+RUN wget http://developer.download.nvidia.com/compute/cuda/6_5/rel/installers/cuda_6.5.14_linux_64.run -P /usr/cudasamples/ \
+    && sh /usr/cudasamples/cuda-samples-linux-6.5.14-18745345.run -noprompt \
+    &&  make -C /usr/local/cuda/samples -j8
 
-RUN wget https://developer.nvidia.com/compute/cuda/9.1/Prod/cluster_management/cuda_cluster_pkgs_9.1.85_ubuntu1604 -P /usr/src/ \
-    && tar -zxvf /usr/src/cuda_cluster_pkgs_9.1.85_ubuntu1604 cuda_cluster_pkgs_ubuntu1604/cuda-cluster-devel-9-1_9.1.85-1_amd64.deb \
-    && ar x ./cuda_cluster_pkgs_ubuntu1604/cuda-cluster-devel-9-1_9.1.85-1_amd64.deb data.tar.xz \
-    && tar -xJvf data.tar.xz ./usr/local/cuda-9.1/samples \
-    && make -C /usr/local/cuda-9.1/samples \
-    && rm -r cuda_cluster_pkgs_ubuntu1604 && rm data.tar.xz && rm /usr/src/cuda_cluster_pkgs_9.1.85_ubuntu1604
+RUN         apt-get update \
+                && apt-get install -y --no-install-recommends \
+                    libgsl0-dev 
 
 # add boost and install additional libraries
 RUN wget https://sourceforge.net/projects/boost/files/boost/1.58.0/boost_1_58_0.tar.bz2 -P /usr/src/ \
@@ -82,9 +77,16 @@ RUN wget https://sourceforge.net/projects/boost/files/boost/1.58.0/boost_1_58_0.
     && ./bootstrap.sh --with-libraries=program_options,filesystem,system,thread,atomic,chrono,date_time \
     && ./b2 install
 
+# RUN wget https://sourceforge.net/projects/boost/files/boost/1.55.0/boost_1_55_0.tar.bz2 -P /usr/src/ \
+#     && cd /usr/src/ && tar -xf boost_1_55_0.tar.bz2 \
+#     && cd /usr/src/boost_1_55_0 \
+#     && ./bootstrap.sh --with-libraries=program_options,filesystem,system,thread,atomic,chrono,date_time \
+#     && ./b2 install
+
 # this is the relevant fetalReconstruction use the copy when you need to modify the code
-COPY ./fetalReconstruction /usr/src/fetalReconstruction/
-# RUN git clone https://github.com/bkainz/fetalReconstruction.git /usr/src/fetalReconstruction/
+# COPY ./fetalReconstruction /usr/src/fetalReconstruction/
+RUN git clone https://github.com/bkainz/fetalReconstruction.git /usr/src/fetalReconstruction/ \
+&& cd /usr/src/fetalReconstruction/ && git checkout 042b4f7acaaf4c572de1c1ff1bca95bb746e4fae
 
 # build ZLIB
 RUN cd /usr/src/fetalReconstruction/source/IRTKSimple2/nifti/zlib \
@@ -95,23 +97,23 @@ RUN mkdir /usr/src/fetalReconstruction/source/build \
         && mkdir /data \
     && cd /usr/src/fetalReconstruction/source/build 
 
-# update cmake to the latest version so that it plays nice with CUDA 9.0
-RUN apt-get update \
-                && apt-get install -y --no-install-recommends \
-                    apt-transport-https ca-certificates gnupg software-properties-common wget \
-    && wget -O - https://apt.kitware.com/keys/kitware-archive-latest.asc 2>/dev/null | apt-key add - \
-    && apt-add-repository 'deb https://apt.kitware.com/ubuntu/ xenial main' \
-    && apt-get update \
-    && apt-get install -y --no-install-recommends cmake
+# # update cmake to the latest version so that it plays nice with CUDA 9.0
+# RUN apt-get update \
+#                 && apt-get install -y --no-install-recommends \
+#                     apt-transport-https ca-certificates gnupg software-properties-common wget \
+#     && wget -O - https://apt.kitware.com/keys/kitware-archive-latest.asc 2>/dev/null | apt-key add - \
+#     && apt-add-repository 'deb https://apt.kitware.com/ubuntu/ xenial main' \
+#     && apt-get update \
+#     && apt-get install -y --no-install-recommends cmake
 
 RUN cd /usr/src/fetalReconstruction/source/build \
-    && cmake -DCUDA_SDK_ROOT_DIR:PATH=/usr/local/cuda-9.1/samples -DCUDA_NVCC_FLAGS=-gencode=arch=compute_70,code=sm_70 .. \
-    # && cmake -DCUDA_SDK_ROOT_DIR:PATH=/usr/local/cuda-9.1/samples .. \
-    # && cmake -DCUDA_SDK_ROOT_DIR:PATH=/usr/local/cuda-9.1/samples -DCUDA_CUDA_LIBRARY:PATH=/usr/lib/x86_64-linux-gnu/libcuda.so .. \
-    && make ; exit 0
-# the error above is werid. run make again and it is all good, I don't know why
+    # && cmake -DCUDA_SDK_ROOT_DIR:PATH=/usr/local/cuda/samples -DCUDA_NVCC_FLAGS=-gencode=arch=compute_35,code=sm_35 .. \
+    && cmake -DCUDA_SDK_ROOT_DIR:PATH=/usr/local/cuda/samples .. \
+    # && cmake -DCUDA_SDK_ROOT_DIR:PATH=/usr/local/cuda/samples -DCUDA_CUDA_LIBRARY:PATH=/usr/lib/x86_64-linux-gnu/libcuda.so .. \
+    && make -j8 ; exit 0
+# the error above is weird. run make again and it is all good, I don't know why
 RUN cd /usr/src/fetalReconstruction/source/build \
-    && make \
+    && make -j8 \
     && cp /usr/src/fetalReconstruction/source/bin/PVRreconstructionGPU /usr/bin \
     && cp /usr/src/fetalReconstruction/source/bin/SVRreconstructionGPU /usr/bin
 
